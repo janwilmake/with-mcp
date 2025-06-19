@@ -1,0 +1,6 @@
+name="with-mcp"
+main="example.ts"
+compatibility_date = "2025-06-18"
+route.custom_domain = true
+route.pattern = "with-mcp.wilmake.com"
+dev.port = 3000

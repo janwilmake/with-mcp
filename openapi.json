@@ -1,0 +1,55 @@
+{
+  "paths": {
+    "/add": {
+      "post": {
+        "operationId": "addNumbers",
+        "summary": "Add two numbers",
+        "description": "Adds two numbers together and returns the result",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "number",
+                    "description": "First number to add"
+                  },
+                  "b": {
+                    "type": "number",
+                    "description": "Second number to add"
+                  }
+                },
+                "required": ["a", "b"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Addition result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "number",
+                      "description": "The sum of the two numbers"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - invalid input"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {}
+  }
+}
