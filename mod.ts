@@ -78,8 +78,47 @@ export function withMcp<TEnv = {}>(
     const url = new URL(request.url);
 
     // Handle MCP endpoint
-    if (url.pathname === "/mcp" && request.method === "POST") {
-      return handleMcp(request, env, ctx, allOperations, config, handler);
+    if (url.pathname === "/mcp") {
+      // Handle preflight OPTIONS request
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400",
+          },
+        });
+      }
+
+      if (request.method === "POST") {
+        const response = await handleMcp(
+          request,
+          env,
+          ctx,
+          allOperations,
+          config,
+          handler,
+        );
+
+        // Add CORS headers to the response
+        const corsHeaders = {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        };
+
+        // Clone the response to add headers
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: {
+            ...Object.fromEntries(response.headers.entries()),
+            ...corsHeaders,
+          },
+        });
+      }
     }
 
     // Pass through to original handler
@@ -431,6 +470,11 @@ function inferMimeType(operation: OpenAPIOperation): string {
       if (response.content) {
         const contentTypes = Object.keys(response.content);
         if (contentTypes.length > 0) {
+          const preferred = ["text/plain", "text/markdown"];
+          const pref = contentTypes.find((x) => preferred.includes(x));
+          if (pref) {
+            return pref;
+          }
           return contentTypes[0];
         }
       }
@@ -482,13 +526,22 @@ async function executeOperation(
     finalUrl.search = queryParams.toString();
   }
 
+  const origHeaders = Object.fromEntries(
+    originalRequest.headers
+      .entries()
+      .map(([key, val]) => [key.toLowerCase(), val]),
+  );
+  const headers = {
+    ...origHeaders,
+    accept: inferMimeType(op.operation),
+    "content-type": "application/json",
+  };
+
+  console.log({ origHeaders, headers });
   // Create the API request
   const apiRequest = new Request(finalUrl.toString(), {
     method: op.method.toUpperCase(),
-    headers: {
-      "Content-Type": "application/json",
-      ...Object.fromEntries(originalRequest.headers.entries()),
-    },
+    headers,
     ...(op.method.toUpperCase() !== "GET" &&
       Object.keys(bodyData).length > 0 && {
         body: JSON.stringify(bodyData),

@@ -1,6 +1,6 @@
 {
   "name": "with-mcp",
-  "version": "0.0.2",
+  "version": "0.0.7",
   "files": [
     "mod.ts"
   ],
