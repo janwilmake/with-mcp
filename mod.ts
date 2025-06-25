@@ -1,4 +1,5 @@
 interface McpConfig {
+  /** defaults to 2025-03-26 */
   protocolVersion?: string;
   promptOperationIds?: string[];
   toolOperationIds?: string[];
@@ -111,7 +112,7 @@ async function handleMcp(
           jsonrpc: "2.0",
           id: message.id,
           result: {
-            protocolVersion: config.protocolVersion || "2025-06-18",
+            protocolVersion: config.protocolVersion || "2025-03-26",
             capabilities: {
               ...(config.promptOperationIds.length > 0 && { prompts: {} }),
               ...(config.resourceOperationIds.length > 0 && { resources: {} }),
