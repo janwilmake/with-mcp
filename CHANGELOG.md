@@ -6,3 +6,4 @@ Thread: https://x.com/janwilmake/status/1935667537838309723
 # 2025-08-19
 
 - Added ability to handle 401 and 402 responses the right way, proxying the openapi response
+- Added `authEndpoint` property. This is added as middleware to all methods to check for 401/402 responses.
