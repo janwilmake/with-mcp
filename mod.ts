@@ -1,6 +1,20 @@
+/// <reference types="@cloudflare/workers-types" />
+/// <reference lib="esnext" />
+
 interface McpConfig {
   /** defaults to 2025-03-26 */
   protocolVersion?: string;
+  /** GET endpoint that returns MCP-compatible 401 if authentication isn't valid.
+   *
+   * e.g. '/me'
+   *
+   * Will be used before responding with "initialize" and '.../list' methods
+   */
+  authEndpoint?: string;
+  serverInfo?: {
+    name: string;
+    version: string;
+  };
   promptOperationIds?: string[];
   toolOperationIds?: string[];
   resourceOperationIds?: string[];
@@ -51,10 +65,10 @@ export function withMcp<TEnv = {}>(
   handler: (
     request: Request,
     env: TEnv,
-    ctx: ExecutionContext,
+    ctx: ExecutionContext
   ) => Promise<Response>,
   openapi: OpenAPISpec,
-  config: McpConfig,
+  config: McpConfig
 ) {
   // Extract operations by operationId
   const allOperations = new Map<
@@ -73,7 +87,7 @@ export function withMcp<TEnv = {}>(
   return async (
     request: Request,
     env: TEnv,
-    ctx: ExecutionContext,
+    ctx: ExecutionContext
   ): Promise<Response> => {
     const url = new URL(request.url);
 
@@ -99,7 +113,7 @@ export function withMcp<TEnv = {}>(
           ctx,
           allOperations,
           config,
-          handler,
+          handler
         );
 
         // Add CORS headers to the response
@@ -126,6 +140,46 @@ export function withMcp<TEnv = {}>(
   };
 }
 
+async function checkAuth(
+  config: McpConfig,
+  originalRequest: Request,
+  originalHandler: (
+    request: Request,
+    env: any,
+    ctx: ExecutionContext
+  ) => Promise<Response>,
+  env: any,
+  ctx: any
+): Promise<Response | null> {
+  if (!config.authEndpoint) {
+    return null; // No auth required
+  }
+
+  // Build auth request
+  const baseUrl = new URL(originalRequest.url).origin;
+  const authUrl = new URL(config.authEndpoint, baseUrl);
+
+  const origHeaders = Object.fromEntries(
+    originalRequest.headers
+      .entries()
+      .map(([key, val]) => [key.toLowerCase(), val])
+  );
+
+  const authRequest = new Request(authUrl.toString(), {
+    method: "GET",
+    headers: origHeaders,
+  });
+
+  const authResponse = await originalHandler(authRequest, env, ctx);
+
+  // If auth failed, return the auth response
+  if (authResponse.status === 401 || authResponse.status === 402) {
+    return authResponse;
+  }
+
+  return null; // Auth passed
+}
+
 async function handleMcp(
   request: Request,
   env: any,
@@ -138,14 +192,26 @@ async function handleMcp(
   originalHandler: (
     request: Request,
     env: any,
-    ctx: ExecutionContext,
-  ) => Promise<Response>,
+    ctx: ExecutionContext
+  ) => Promise<Response>
 ): Promise<Response> {
   try {
     const message: any = await request.json();
 
     // Handle initialize
     if (message.method === "initialize") {
+      // Check auth if configured
+      const authResult = await checkAuth(
+        config,
+        request,
+        originalHandler,
+        env,
+        ctx
+      );
+      if (authResult) {
+        return authResult;
+      }
+
       return new Response(
         JSON.stringify({
           jsonrpc: "2.0",
@@ -153,19 +219,20 @@ async function handleMcp(
           result: {
             protocolVersion: config.protocolVersion || "2025-03-26",
             capabilities: {
-              ...(config.promptOperationIds.length > 0 && { prompts: {} }),
-              ...(config.resourceOperationIds.length > 0 && { resources: {} }),
-              ...(config.toolOperationIds.length > 0 && { tools: {} }),
+              ...(config.promptOperationIds &&
+                config.promptOperationIds.length > 0 && { prompts: {} }),
+              ...(config.resourceOperationIds &&
+                config.resourceOperationIds.length > 0 && { resources: {} }),
+              ...(config.toolOperationIds &&
+                config.toolOperationIds.length > 0 && { tools: {} }),
             },
-            serverInfo: {
+            serverInfo: config.serverInfo || {
               name: "OpenAPI-MCP-Server",
               version: "1.0.0",
             },
           },
         }),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+        { headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -176,7 +243,19 @@ async function handleMcp(
 
     // Handle prompts/list
     if (message.method === "prompts/list") {
-      const prompts = config.promptOperationIds
+      // Check auth if configured
+      const authResult = await checkAuth(
+        config,
+        request,
+        originalHandler,
+        env,
+        ctx
+      );
+      if (authResult) {
+        return authResult;
+      }
+
+      const prompts = (config.promptOperationIds || [])
         .map((opId) => {
           const op = allOperations.get(opId);
           if (!op) return null;
@@ -196,9 +275,7 @@ async function handleMcp(
           id: message.id,
           result: { prompts },
         }),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+        { headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -207,19 +284,26 @@ async function handleMcp(
       const { name, arguments: args } = message.params;
       const op = allOperations.get(name);
 
-      if (!op || !config.promptOperationIds.includes(name)) {
+      if (!op || !(config.promptOperationIds || []).includes(name)) {
         return createError(message.id, -32602, `Unknown prompt: ${name}`);
       }
 
-      // Execute the operation and convert to prompt messages
+      // Execute the operation (which includes its own auth check)
       const apiResponse = await executeOperation(
         op,
         args,
         originalHandler,
         request,
         env,
-        ctx,
+        ctx
       );
+
+      // If 401 or 402, proxy the response as-is
+      if (apiResponse.status === 401 || apiResponse.status === 402) {
+        return apiResponse;
+      }
+
+      // Convert to prompt messages
       const messages = await convertResponseToPromptMessages(apiResponse);
 
       return new Response(
@@ -231,15 +315,25 @@ async function handleMcp(
             messages,
           },
         }),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+        { headers: { "Content-Type": "application/json" } }
       );
     }
 
     // Handle resources/list
     if (message.method === "resources/list") {
-      const resources = config.resourceOperationIds
+      // Check auth if configured
+      const authResult = await checkAuth(
+        config,
+        request,
+        originalHandler,
+        env,
+        ctx
+      );
+      if (authResult) {
+        return authResult;
+      }
+
+      const resources = (config.resourceOperationIds || [])
         .map((opId) => {
           const op = allOperations.get(opId);
           if (!op) return null;
@@ -260,9 +354,7 @@ async function handleMcp(
           id: message.id,
           result: { resources },
         }),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+        { headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -272,22 +364,29 @@ async function handleMcp(
       const opId = uri.replace("resource://", "");
       const op = allOperations.get(opId);
 
-      if (!op || !config.resourceOperationIds.includes(opId)) {
+      if (!op || !(config.resourceOperationIds || []).includes(opId)) {
         return createError(message.id, -32002, `Resource not found: ${uri}`);
       }
 
-      // Execute the operation and convert to resource content
+      // Execute the operation (which includes its own auth check)
       const apiResponse = await executeOperation(
         op,
         {},
         originalHandler,
         request,
         env,
-        ctx,
+        ctx
       );
+
+      // If 401 or 402, proxy the response as-is
+      if (apiResponse.status === 401 || apiResponse.status === 402) {
+        return apiResponse;
+      }
+
+      // Convert to resource content
       const contents = await convertResponseToResourceContents(
         apiResponse,
-        uri,
+        uri
       );
 
       return new Response(
@@ -296,15 +395,25 @@ async function handleMcp(
           id: message.id,
           result: { contents },
         }),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+        { headers: { "Content-Type": "application/json" } }
       );
     }
 
     // Handle tools/list
     if (message.method === "tools/list") {
-      const tools = config.toolOperationIds
+      // Check auth if configured
+      const authResult = await checkAuth(
+        config,
+        request,
+        originalHandler,
+        env,
+        ctx
+      );
+      if (authResult) {
+        return authResult;
+      }
+
+      const tools = (config.toolOperationIds || [])
         .map((opId) => {
           const op = allOperations.get(opId);
           if (!op) return null;
@@ -324,9 +433,7 @@ async function handleMcp(
           id: message.id,
           result: { tools },
         }),
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+        { headers: { "Content-Type": "application/json" } }
       );
     }
 
@@ -335,19 +442,26 @@ async function handleMcp(
       const { name, arguments: args } = message.params;
       const op = allOperations.get(name);
 
-      if (!op || !config.toolOperationIds.includes(name)) {
+      if (!op || !(config.toolOperationIds || []).includes(name)) {
         return createError(message.id, -32602, `Unknown tool: ${name}`);
       }
 
       try {
+        // Execute the operation (which includes its own auth check)
         const apiResponse = await executeOperation(
           op,
           args,
           originalHandler,
           request,
           env,
-          ctx,
+          ctx
         );
+
+        // If 401 or 402, proxy the response as-is
+        if (apiResponse.status === 401 || apiResponse.status === 402) {
+          return apiResponse;
+        }
+
         const content = await convertResponseToToolContent(apiResponse);
 
         return new Response(
@@ -359,9 +473,7 @@ async function handleMcp(
               isError: !apiResponse.ok,
             },
           }),
-          {
-            headers: { "Content-Type": "application/json" },
-          },
+          { headers: { "Content-Type": "application/json" } }
         );
       } catch (error) {
         return new Response(
@@ -380,7 +492,7 @@ async function handleMcp(
           }),
           {
             headers: { "Content-Type": "application/json" },
-          },
+          }
         );
       }
     }
@@ -388,7 +500,7 @@ async function handleMcp(
     return createError(
       message.id,
       -32601,
-      `Method not found: ${message.method}`,
+      `Method not found: ${message.method}`
     );
   } catch (error) {
     return createError(null, -32700, "Parse error");
@@ -490,11 +602,11 @@ async function executeOperation(
   originalHandler: (
     request: Request,
     env: any,
-    ctx: ExecutionContext,
+    ctx: ExecutionContext
   ) => Promise<Response>,
   originalRequest: Request,
   env: any,
-  ctx: any,
+  ctx: any
 ): Promise<Response> {
   // Build the API request URL
   let url = op.path;
@@ -529,7 +641,7 @@ async function executeOperation(
   const origHeaders = Object.fromEntries(
     originalRequest.headers
       .entries()
-      .map(([key, val]) => [key.toLowerCase(), val]),
+      .map(([key, val]) => [key.toLowerCase(), val])
   );
   const headers = {
     ...origHeaders,
@@ -569,7 +681,7 @@ async function convertResponseToPromptMessages(response: Response) {
 
 async function convertResponseToResourceContents(
   response: Response,
-  uri: string,
+  uri: string
 ) {
   const text = await response.text();
   const contentType = response.headers.get("content-type") || "text/plain";
@@ -585,13 +697,7 @@ async function convertResponseToResourceContents(
 
 async function convertResponseToToolContent(response: Response) {
   const text = await response.text();
-
-  return [
-    {
-      type: "text" as const,
-      text,
-    },
-  ];
+  return [{ type: "text" as const, text }];
 }
 
 function createError(id: any, code: number, message: string) {
@@ -604,6 +710,6 @@ function createError(id: any, code: number, message: string) {
     {
       status: 200, // JSON-RPC errors use 200 status
       headers: { "Content-Type": "application/json" },
-    },
+    }
   );
 }
