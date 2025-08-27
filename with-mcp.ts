@@ -100,7 +100,8 @@ export function withMcp<TEnv = {}>(
           headers: {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Allow-Headers":
+              "Content-Type, Authorization, MCP-Protocol-Version",
             "Access-Control-Max-Age": "86400",
           },
         });
@@ -120,7 +121,8 @@ export function withMcp<TEnv = {}>(
         const corsHeaders = {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "Access-Control-Allow-Headers":
+            "Content-Type, Authorization, MCP-Protocol-Version",
         };
 
         // Clone the response to add headers
@@ -164,7 +166,12 @@ async function checkAuth(
       .entries()
       .map(([key, val]) => [key.toLowerCase(), val])
   );
-
+  console.log(
+    "checking auth at",
+    authUrl.toString(),
+    "auth",
+    origHeaders.Authorization
+  );
   const authRequest = new Request(authUrl.toString(), {
     method: "GET",
     headers: origHeaders,
@@ -209,35 +216,41 @@ async function handleMcp(
         ctx
       );
       if (authResult) {
+        console.log("initialize", {
+          status: authResult.status,
+          authResult: await authResult.clone().text(),
+        });
         return authResult;
       }
-
-      return new Response(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: {
-            protocolVersion: config.protocolVersion || "2025-03-26",
-            capabilities: {
-              ...(config.promptOperationIds &&
-                config.promptOperationIds.length > 0 && { prompts: {} }),
-              ...(config.resourceOperationIds &&
-                config.resourceOperationIds.length > 0 && { resources: {} }),
-              ...(config.toolOperationIds &&
-                config.toolOperationIds.length > 0 && { tools: {} }),
-            },
-            serverInfo: config.serverInfo || {
-              name: "OpenAPI-MCP-Server",
-              version: "1.0.0",
-            },
+      const initializeResult = {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          protocolVersion: config.protocolVersion || "2025-03-26",
+          capabilities: {
+            ...(config.promptOperationIds &&
+              config.promptOperationIds.length > 0 && { prompts: {} }),
+            ...(config.resourceOperationIds &&
+              config.resourceOperationIds.length > 0 && { resources: {} }),
+            ...(config.toolOperationIds &&
+              config.toolOperationIds.length > 0 && { tools: {} }),
           },
-        }),
-        { headers: { "Content-Type": "application/json" } }
-      );
+          serverInfo: config.serverInfo || {
+            name: "OpenAPI-MCP-Server",
+            version: "1.0.0",
+          },
+        },
+      };
+
+      console.log("initialize", { initializeResult });
+      return new Response(JSON.stringify(initializeResult), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // Handle initialized notification
     if (message.method === "notifications/initialized") {
+      console.log("notifications/initialized");
       return new Response(null, { status: 202 });
     }
 
@@ -410,6 +423,10 @@ async function handleMcp(
         ctx
       );
       if (authResult) {
+        console.log("tools/list", {
+          status: authResult.status,
+          authResult: await authResult.clone().text(),
+        });
         return authResult;
       }
 
@@ -427,14 +444,15 @@ async function handleMcp(
         })
         .filter(Boolean);
 
-      return new Response(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: message.id,
-          result: { tools },
-        }),
-        { headers: { "Content-Type": "application/json" } }
-      );
+      const toolsListResult = {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { tools },
+      };
+      console.log({ toolsListResult });
+      return new Response(JSON.stringify(toolsListResult), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // Handle tools/call

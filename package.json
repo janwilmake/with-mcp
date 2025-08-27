@@ -1,10 +1,10 @@
 {
   "name": "with-mcp",
-  "version": "0.0.9",
+  "version": "0.0.11",
   "files": [
-    "mod.ts"
+    "with-mcp.ts"
   ],
-  "main": "mod.ts",
+  "main": "with-mcp.ts",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250819.0"
   }
