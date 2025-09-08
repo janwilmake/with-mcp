@@ -62,11 +62,7 @@ interface OpenAPISpec {
 }
 
 export function withMcp<TEnv = {}>(
-  handler: (
-    request: Request,
-    env: TEnv,
-    ctx: ExecutionContext
-  ) => Promise<Response>,
+  handler: ExportedHandlerFetchHandler,
   openapi: OpenAPISpec,
   config: McpConfig
 ) {
@@ -145,11 +141,7 @@ export function withMcp<TEnv = {}>(
 async function checkAuth(
   config: McpConfig,
   originalRequest: Request,
-  originalHandler: (
-    request: Request,
-    env: any,
-    ctx: ExecutionContext
-  ) => Promise<Response>,
+  originalHandler: ExportedHandlerFetchHandler,
   env: any,
   ctx: any
 ): Promise<Response | null> {
@@ -175,7 +167,7 @@ async function checkAuth(
   const authRequest = new Request(authUrl.toString(), {
     method: "GET",
     headers: origHeaders,
-  });
+  }) as Request<unknown, IncomingRequestCfProperties<unknown>>;
 
   const authResponse = await originalHandler(authRequest, env, ctx);
 
@@ -196,11 +188,7 @@ async function handleMcp(
     { path: string; method: string; operation: OpenAPIOperation }
   >,
   config: McpConfig,
-  originalHandler: (
-    request: Request,
-    env: any,
-    ctx: ExecutionContext
-  ) => Promise<Response>
+  originalHandler: ExportedHandlerFetchHandler
 ): Promise<Response> {
   try {
     const message: any = await request.json();
@@ -617,11 +605,7 @@ function inferMimeType(operation: OpenAPIOperation): string {
 async function executeOperation(
   op: { path: string; method: string; operation: OpenAPIOperation },
   args: any,
-  originalHandler: (
-    request: Request,
-    env: any,
-    ctx: ExecutionContext
-  ) => Promise<Response>,
+  originalHandler: ExportedHandlerFetchHandler,
   originalRequest: Request,
   env: any,
   ctx: any
@@ -676,7 +660,7 @@ async function executeOperation(
       Object.keys(bodyData).length > 0 && {
         body: JSON.stringify(bodyData),
       }),
-  });
+  }) as Request<unknown, IncomingRequestCfProperties<unknown>>;
 
   return originalHandler(apiRequest, env, ctx);
 }
