@@ -103,6 +103,12 @@ export function withMcp<TEnv = {}>(
         });
       }
 
+      if (request.method === "GET") {
+        return new Response("Only Streamable HTTP is supported", {
+          status: 405,
+        });
+      }
+
       if (request.method === "POST") {
         const response = await handleMcp(
           request,
@@ -194,6 +200,17 @@ async function handleMcp(
     const message: any = await request.json();
 
     // Handle initialize
+
+    if (message.method === "ping") {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {},
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    }
     if (message.method === "initialize") {
       // Check auth if configured
       const authResult = await checkAuth(
