@@ -632,6 +632,13 @@ async function executeOperation(
   const queryParams = new URLSearchParams();
   const bodyData: any = {};
 
+  // query params in the URL will be input into the API as well, regardless of whether or not they appear in the openapi
+  // needed for https://smithery.ai/docs/build/session-config#well-known-endpoint-approach
+  const originalRequestUrl = new URL(originalRequest.url);
+  originalRequestUrl.searchParams.forEach((value, key) => {
+    queryParams.set(key, value);
+  });
+
   // Handle parameters
   if (op.operation.parameters) {
     for (const param of op.operation.parameters) {
