@@ -164,12 +164,7 @@ async function checkAuth(
       .entries()
       .map(([key, val]) => [key.toLowerCase(), val])
   );
-  console.log(
-    "checking auth at",
-    authUrl.toString(),
-    "auth",
-    origHeaders.Authorization
-  );
+
   const authRequest = new Request(authUrl.toString(), {
     method: "GET",
     headers: origHeaders,
@@ -675,7 +670,6 @@ async function executeOperation(
     "content-type": "application/json",
   };
 
-  console.log({ origHeaders, headers });
   // Create the API request
   const apiRequest = new Request(finalUrl.toString(), {
     method: op.method.toUpperCase(),
